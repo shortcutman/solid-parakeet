@@ -1,10 +1,38 @@
 const { GraphQLScalarType } = require('graphql')
+const fetch = require('node-fetch')
+
+const requestGithubToken = credentials => {
+	return fetch(
+		'https://github.com/login/oauth/access_token',
+		{
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Accept: 'application/json'
+			},
+			body: JSON.stringify(credentials)
+		}
+	).then(res => res.json())
+	.catch(error => {
+		throw new Error(JSON.stringify(error))
+	});
+}
+
+const requestGithubUserAccount = token =>
+	fetch(`https://api.github.com/user?access_token=${token}`)
+		.then(res => res.json())
+		.catch(error => {
+			throw new Error(JSON.stringify(error))
+		});
+
+async function authoriseWithGithub(credentials) {
+	const token = await requestGithubToken(credentials)
+	const { access_token } = token;
+	const githubUser = await requestGithubUserAccount(token.access_token)
+	return { ...githubUser, access_token}
+}
 
 const resolvers = {
-	// Query: {
-	// 	totalPhotos: () => photos.length,
-	// 	allPhotos: () => photos
-	// },
 	Query: {
 		totalPhotos: (parent, args, { db }) =>
 			db.collection('photos').estimatedDocumentCount(),
@@ -25,6 +53,41 @@ const resolvers = {
 
 			photos.push(newPhoto);
 			return newPhoto;
+		},
+		async githubAuth(parent, { code }, { db }) {
+			let blah
+			 = await authoriseWithGithub({
+				client_id: process.env.CLIENT_ID,
+				client_secret: process.env.CLIENT_SECRET,
+				code
+			})
+			let {
+				message,
+				access_token,
+				avatar_url,
+				login,
+				name
+			} = blah;
+			console.log("blah");
+			console.log(blah);
+			console.log(access_token);
+			if (message) {
+				console.log(access_token)
+				throw new Error(message)
+			}
+			let latestUserInfo = {
+				name,
+				githubLogin: login,
+				githubToken: access_token,
+				avatar: avatar_url
+			}
+			// const { ops:[user] } = await db
+			// 	.collection('users')
+			// 	.replaceOne({ githubLogin: login }, latestUserInfo, {upsert:true})
+			return { user: {
+				githubLogin: login,
+				latestUserInfo
+			}, token: access_token}
 		}
 	},
 	Photo: {
@@ -58,7 +121,9 @@ const resolvers = {
 		parseValue: value => new Date(value),
 		serialize: value => new Date(value).toISOString(),
 		parseLiteral: ast => ast.value
-	})
+	}),
+	AuthPayload: {
+	}
 }
 
 module.exports = resolvers
